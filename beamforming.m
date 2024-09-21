@@ -1,98 +1,151 @@
-%% Static Beam
-% Parameters
-N = 8;                 % Number of array elements
-d = 0.5;               % Element spacing (in wavelengths)
-theta_steering = 30;   % Steering angle (in degrees)
-lambda = 1;            % Wavelength
-k = 2*pi/lambda;       % Wavenumber
+import numpy as np
+import matplotlib.pyplot as plt
 
-% Define the angle range
-theta = -90:0.1:90;    % Angles to plot (degrees)
-theta_rad = deg2rad(theta);  % Convert to radians
+# Simulation parameters
+num_elements = 4  # Number of antenna elements
+f = 9.55*1e9           # Frequency of signal (1 GHz)
+c = 3e8           # Speed of light (m/s)
+wavelength = c / f  # Wavelength
+d = wavelength/2  # Spacing between elements (half wavelength)
+fs = 100*f         # Sampling frequency (100 times the frequency)
+Ts = 1/fs           # Sampling period
+t_total = 4*(1/f)  # Total time for simulation (4 signal cycles)
 
-% Phase shift for beam steering
-steering_vector = exp(1j * k * d * (0:N-1)' * sind(theta_steering));
+# Arrival angle of the signal (in degrees)
+theta = 20  # Signal arrival angle
 
-% Array factor calculation
-array_factor = zeros(size(theta));
-for n = 1:N
-    % Phase shift for each element
-    phase_shift = exp(1j * (n-1) * k * d * sind(theta));
-    array_factor = array_factor + steering_vector(n) * phase_shift;
-end
+# Time vector for signal (assume 4 microsecond of data)
+t = np.linspace(start=0, stop=t_total, num=int(t_total/Ts))
+print("N samples: "+str(np.shape(t)))
 
-% Normalization
-array_factor = abs(array_factor) / max(abs(array_factor));
+# Original signal (sinusoidal)
+signal = np.sin(2 * np.pi * f * t)
 
-% Plot the beam pattern
-figure;
-polarplot(deg2rad(theta), array_factor, 'LineWidth', 2);
-title('Beamforming Pattern');
-rlim([0 1]);
-ax = gca;
-ax.ThetaZeroLocation = 'top';
-ax.ThetaDir = 'clockwise';
-ax.RColor = 'r';
-ax.ThetaColor = 'b';
+# noise signal
+# AWGN parameters
+SNR_dB = 7  # Signal-to-noise ratio in dB
+SNR = 10**(SNR_dB / 10)  # Convert SNR from dB to linear scale
 
-% Optional plot in cartesian coordinates
-figure;
-plot(theta, 20*log10(array_factor), 'LineWidth', 2);
-xlabel('Angle (degrees)');
-ylabel('Array Factor (dB)');
-title('Beamforming Pattern (in dB)');
-grid on;
+# Compute noise variance
+signal_power = np.mean(signal**2)  # Signal power
+noise_power = signal_power/SNR #signal_power / SNR  # Noise power
 
-%% Dynamic Beam
-clear; clc;
-% Parameters
-N = 4;                 % Number of array elements
-d = 0.5;               % Element spacing (in wavelengths)
-lambda = 1;            % Wavelength
-k = 2*pi/lambda;       % Wavenumber
+# Generate AWGN
+noise_signals = np.zeros((num_elements, len(t)), dtype=complex)
+for i in range(num_elements):
+    noise_signals[i, :] = np.sqrt(noise_power) * np.random.randn(len(t))
 
-% Define the angle range (top half of the circle: 0 to 180 degrees)
-theta = -90:0.1:90;     % Angles to plot (degrees)
-theta_rad = deg2rad(theta);  % Convert to radians
 
-% Prepare the figure for animation
-figure;
-figure('Position', [100, 100, 1200, 900]);  % Larger figure: 800x600 pixels
-h = polarplot(theta_rad, zeros(size(theta)), 'LineWidth', 1);  % Beam pattern plot
-hold on;
-h_main_lobe = polarplot([0 0], [0 1], 'r', 'LineWidth', 2);    % Red line for main lobe
-hold off;
-rlim([0 1]);
-ax = gca;
-ax.ThetaZeroLocation = 'top';
-ax.ThetaDir = 'clockwise';
-ax.RColor = 'r';
-ax.ThetaColor = 'b';
-title('Beamforming Pattern with Steering Angle Indicator');
+# Phase shifts for each antenna element based on arrival angle
+delta_theta=np.zeros(num_elements)
 
-% Animation loop (sweeping steering angle from -30 to 30 degrees)
-for theta_steering = -40:0.5:40
-    % Phase shift for beam steering
-    steering_vector = exp(1j * k * d * (0:N-1)' * sind(theta_steering));
-    
-    % Array factor calculation
-    array_factor = zeros(size(theta));
-    for n = 1:N
-        % Phase shift for each element
-        phase_shift = exp(1j * (n-1) * k * d * sind(theta));
-        array_factor = array_factor + steering_vector(n) * phase_shift;
-    end
+# Phase center of the array (in wavelengths)
+phase_center = (num_elements-1) * d / 2  # For 4 elements, this will be 3 * (lambda/2) / 2 = 3 * lambda / 4
+# Steering vector calculation
+steering_vector = np.zeros(num_elements, dtype=complex)
 
-    % Normalization
-    array_factor = abs(array_factor) / max(abs(array_factor));
+for i in range(num_elements):
+    element_position = i * d  # Position of the i-th element
+    relative_position = element_position - phase_center  # Position relative to the phase center
+    print("Relative position: ", relative_position)
+    steering_vector[i] = (1/np.sqrt(num_elements)) * np.exp(-1j * 2 * np.pi * relative_position * np.sin(np.radians(theta)) / wavelength)
+    #steering_vector[i] = np.exp(-1j * 2 * np.pi * relative_position * np.sin(np.radians(theta)) / wavelength)
 
-    % Update the polar plot data
-    set(h, 'YData', array_factor);
-    
-    % Update the main lobe direction (red line)
-    theta_lobe = deg2rad(-1*theta_steering);  % Convert steering angle to radians
-    set(h_main_lobe, 'ThetaData', [theta_lobe theta_lobe], 'RData', [0 1]);  % Update red line
+    delta_theta[i] = 2*np.pi*np.sin(np.radians(theta))*d*i/wavelength
 
-    % Pause to create animation effect
-    pause(0.05);  % Adjust the pause time to control speed of the animation
-end
+
+# Calculate the center point for delta_theta
+delta_theta = delta_theta - np.mean(delta_theta)
+print("delta_theta (degrees):", np.degrees(delta_theta))
+
+print("Steering Vector Values:", steering_vector)
+steering_phases = np.angle(steering_vector)  # Phase in radians
+print("Steering phases (degrees):", np.degrees(steering_phases))
+
+
+print("Steering vector N samples: "+str(np.size(steering_vector)))
+
+# Create received signals for each element by applying phase shifts
+
+raw_rx = np.zeros((num_elements, len(t)), dtype=complex)
+w_rx = np.zeros((num_elements, len(t)), dtype=complex)
+
+# Plot I (in-phase) and Q (quadrature) components for each antenna element
+plt.figure(figsize=(12, 8))
+
+for i in range(num_elements):
+    attenuation = 1
+    # The initial rx signal at each element (same signal w/varying time/phase delay)
+    raw_rx[i,:] = attenuation*np.sin(2*np.pi*f*t + delta_theta[i]) + noise_signals[i, :]
+
+    # Weighted ("steered") rx signals
+    w_rx[i, :] = raw_rx[i,:]*steering_vector[i]
+    #w_rx[i, :] = raw_rx[i, :] * np.exp(1j * steering_phases[i])
+
+
+    # Plot the in-phase component (real part)
+    plt.subplot(num_elements, 2, 2*i+1)
+    plt.plot(t * 1e6, np.real(raw_rx[i, :]), label=f'Element {i+1} - In-Phase (I)')
+    plt.xlabel('Time (microseconds)')
+    plt.ylabel('Amplitude')
+    plt.title(f'Element {i+1} - In-Phase (I) - Raw Signal')
+    plt.grid(True)
+
+    # Plot the quadrature component (imaginary part)
+    plt.subplot(num_elements, 2, 2*i+2)
+    plt.plot(t * 1e6, np.imag(raw_rx[i, :]), label=f'Element {i+1} - Quadrature (Q)')
+    plt.xlabel('Time (microseconds)')
+    plt.ylabel('Amplitude')
+    plt.title(f'Element {i+1} - Quadrature (Q) - Raw Signal')
+    plt.grid(True)
+# Adjust layout for better viewing
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(12, 8))
+
+for i in range(num_elements):
+  # Plot the in-phase component (real part)
+    plt.subplot(num_elements, 2, 2*i+1)
+    plt.plot(t * 1e6, np.real(w_rx[i, :]), label=f'Element {i+1} - In-Phase (I)')
+    plt.xlabel('Time (microseconds)')
+    plt.ylabel('Amplitude')
+    plt.title(f'Element {i+1} - In-Phase (I) - Rx*W')
+    plt.grid(True)
+
+    # Plot the quadrature component (imaginary part)
+    plt.subplot(num_elements, 2, 2*i+2)
+    plt.plot(t * 1e6, np.imag(w_rx[i, :]), label=f'Element {i+1} - Quadrature (Q)')
+    plt.xlabel('Time (microseconds)')
+    plt.ylabel('Amplitude')
+    plt.title(f'Element {i+1} - Quadrature (Q) Rx*W')
+    plt.grid(True)
+
+# Adjust layout for better viewing
+plt.tight_layout()
+plt.show()
+
+# Beamforming: sum signals after phase shifts
+beamformed_signal = np.sum(w_rx, axis=0)
+
+# Plotting the original and beamformed signals
+plt.figure(figsize=(10, 6))
+
+# Plot the original signal
+plt.plot(t * 1e6, signal, label='Original Signal')
+
+# Plot the real part of the beamformed signal (in-phase component)
+plt.plot(t * 1e6, np.real(beamformed_signal), label='Beamformed Signal (In-Phase)')
+
+# Plot the imaginary part of the beamformed signal (quadrature component)
+#plt.plot(t * 1e6, np.imag(beamformed_signal), label='Beamformed Signal (Quadrature)')
+
+# Labels and legend
+plt.xlabel('Time (microseconds)')
+plt.ylabel('Amplitude')
+plt.title('Real vs Imaginary Parts of Beamformed Signal')
+plt.legend()
+plt.grid(True)
+
+# Show the plot
+plt.show()
